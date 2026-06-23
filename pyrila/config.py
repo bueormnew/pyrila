@@ -96,6 +96,13 @@ class RILAConfig:
     use_soft_topk: bool = True
     soft_topk_temperature: float = 0.5
 
+    # Special token IDs — configured by the user's tokenizer.
+    # The architecture does NOT assume any specific tokenizer.
+    # These are used by the decoder to know when to start/stop generation.
+    pad_token_id: int = 0
+    bos_token_id: int = 2
+    eos_token_id: int = 3
+
     # Internal flag to skip validation (useful for testing with small configs)
     _skip_validation: bool = False
 
@@ -189,3 +196,17 @@ class RILAConfig:
             + pre_output + rve + decoder
         )
         return int(total)
+
+    def to_dict(self) -> dict:
+        """Serialize config to a dictionary (excludes internal fields)."""
+        from dataclasses import fields
+        return {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if not f.name.startswith("_")
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RILAConfig":
+        """Create config from a dictionary."""
+        return cls(**{k: v for k, v in d.items() if not k.startswith("_")}, _skip_validation=True)

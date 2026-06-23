@@ -6,7 +6,9 @@ stages to final output generation.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+import json
+from pathlib import Path
+from typing import Dict, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -170,12 +172,20 @@ class RILA(nn.Module):
             confidence = final_confidence
             budget_used = budget_state.current_cycle
 
-        # Final Decoder
+        # Final Decoder — pass cell_encodings as encoder memory for cross-attention
         if target_ids is not None:
-            output = self.final_decoder(cognitive_state_final, target_tokens=target_ids)
+            output = self.final_decoder(
+                cognitive_state_final,
+                target_tokens=target_ids,
+                encoder_memory=cell_encodings,
+            )
         else:
             max_gen = min(512, self.config.max_sequence_length)
-            output = self.final_decoder.generate(cognitive_state_final, max_length=max_gen)
+            output = self.final_decoder.generate(
+                cognitive_state_final,
+                encoder_memory=cell_encodings,
+                max_length=max_gen,
+            )
 
         return {
             "logits": output,
@@ -273,9 +283,80 @@ class RILA(nn.Module):
                 )
 
             generated = self.final_decoder.generate(
-                cognitive_state_final, max_length=max_length, **generation_kwargs,
+                cognitive_state_final,
+                encoder_memory=cell_encodings,
+                max_length=max_length,
+                **generation_kwargs,
             )
 
         if was_training:
             self.train()
         return generated
+
+    # ==================== Save / Load ====================
+
+    def save(self, path: Union[str, Path]) -> None:
+        """Save model weights and config to a directory.
+
+        Creates:
+            path/config.json  — serialized RILAConfig
+            path/model.pt     — model state_dict
+
+        Args:
+            path: Directory path. Created if it doesn't exist.
+
+        Example:
+            >>> model.save("./my_rila_model")
+            >>> loaded = RILA.load("./my_rila_model")
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Save config
+        config_path = path / "config.json"
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(self.config.to_dict(), f, indent=2)
+
+        # Save weights
+        weights_path = path / "model.pt"
+        torch.save(self.state_dict(), weights_path)
+
+    @classmethod
+    def load(
+        cls,
+        path: Union[str, Path],
+        device: Optional[Union[str, torch.device]] = None,
+    ) -> "RILA":
+        """Load a saved RILA model from a directory.
+
+        Args:
+            path: Directory containing config.json and model.pt.
+            device: Device to load onto ('cpu', 'cuda', etc). Default: cpu.
+
+        Returns:
+            RILA model with loaded weights.
+
+        Example:
+            >>> model = RILA.load("./my_rila_model", device="cuda")
+        """
+        path = Path(path)
+
+        # Load config
+        config_path = path / "config.json"
+        with open(config_path, "r", encoding="utf-8") as f:
+            config_dict = json.load(f)
+        config = RILAConfig.from_dict(config_dict)
+
+        # Create model
+        model = cls(config)
+
+        # Load weights
+        weights_path = path / "model.pt"
+        map_location = device if device else "cpu"
+        state_dict = torch.load(weights_path, map_location=map_location, weights_only=True)
+        model.load_state_dict(state_dict)
+
+        if device and device != "cpu":
+            model = model.to(device)
+
+        return model
