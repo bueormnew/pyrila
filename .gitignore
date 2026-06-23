@@ -35,3 +35,9 @@ Thumbs.db
 # Distribution
 *.tar.gz
 *.zip
+
+# Model checkpoints (don't commit large binary files)
+*.pt
+*.pth
+*.ckpt
+*.bin

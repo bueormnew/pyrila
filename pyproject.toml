@@ -34,9 +34,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rila-team/pyrila"
-Documentation = "https://pyrila.readthedocs.io"
-Repository = "https://github.com/rila-team/pyrila"
+Homepage = "https://github.com/bueormnew/pyrila"
+Documentation = "https://github.com/bueormnew/pyrila#readme"
+Repository = "https://github.com/bueormnew/pyrila"
 
 [tool.setuptools.packages.find]
 include = ["pyrila*"]
