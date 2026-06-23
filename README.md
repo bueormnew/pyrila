@@ -205,7 +205,7 @@ Please ensure all tests pass and follow the existing code style.
   author={RILA Team},
   year={2024},
   url={https://github.com/bueormnew/pyrila},
-  version={0.2.0}
+  version={0.3.0}
 }
 ```
 

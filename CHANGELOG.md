@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.0] - 2025-01-15
+## [0.3.0] - 2025-01-15
 
 ### Changed
 - **Decoder architecture**: Now receives full cell_encodings as cross-attention memory
