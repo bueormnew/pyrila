@@ -108,21 +108,30 @@ class RILA(nn.Module):
         # Cell Builder → cells
         batch_cells = self.cell_builder(embeddings, attention_mask)
 
-        # Cell Encoder → cell encodings
+        # Cell Encoder → cell encodings + token-level embeddings
         all_cells = []
         for cells in batch_cells:
             all_cells.extend(cells)
 
         if not all_cells:
             cell_encodings_flat = torch.zeros(1, self.config.cell_encoding_dim, device=device)
+            token_embeddings_flat = torch.zeros(1, self.config.cell_size, self.config.hidden_dim, device=device)
             num_cells_per_batch = 1
         else:
-            cell_encodings_flat = self.cell_encoder.encode_batch(all_cells)
+            cell_encodings_flat, token_embeddings_flat = self.cell_encoder.encode_batch_with_tokens(all_cells)
             num_cells_per_batch = len(batch_cells[0])
 
         cell_encodings = cell_encodings_flat.view(
             batch_size, num_cells_per_batch, self.config.cell_encoding_dim
         )
+
+        # Token-level memory for decoder: (batch, seq_len, hidden_dim)
+        # Reshape from (total_cells, cell_size, D) → (batch, num_cells*cell_size, D)
+        token_memory = token_embeddings_flat.view(
+            batch_size, num_cells_per_batch * self.config.cell_size, self.config.hidden_dim
+        )
+        # Trim to actual sequence length
+        token_memory = token_memory[:, :seq_len, :]
 
         # Build index (using first batch element)
         self.context_index.build_index(cell_encodings[0])
@@ -172,18 +181,21 @@ class RILA(nn.Module):
             confidence = final_confidence
             budget_used = budget_state.current_cycle
 
-        # Final Decoder — pass cell_encodings as encoder memory for cross-attention
+        # Final Decoder — pass token-level embeddings as encoder memory
+        # The decoder cross-attends over ALL token positions (seq_len),
+        # giving it full access to the input while RILA's reasoning pipeline
+        # (above) has enriched the cognitive_state with retrieval + CLP.
         if target_ids is not None:
             output = self.final_decoder(
                 cognitive_state_final,
                 target_tokens=target_ids,
-                encoder_memory=cell_encodings,
+                encoder_memory=token_memory,
             )
         else:
             max_gen = min(512, self.config.max_sequence_length)
             output = self.final_decoder.generate(
                 cognitive_state_final,
-                encoder_memory=cell_encodings,
+                encoder_memory=token_memory,
                 max_length=max_gen,
             )
 
@@ -241,14 +253,21 @@ class RILA(nn.Module):
 
             if not all_cells:
                 cell_encodings_flat = torch.zeros(1, self.config.cell_encoding_dim, device=device)
+                token_embeddings_flat = torch.zeros(1, self.config.cell_size, self.config.hidden_dim, device=device)
                 num_cells_per_batch = 1
             else:
-                cell_encodings_flat = self.cell_encoder.encode_batch(all_cells)
+                cell_encodings_flat, token_embeddings_flat = self.cell_encoder.encode_batch_with_tokens(all_cells)
                 num_cells_per_batch = len(batch_cells[0])
 
             cell_encodings = cell_encodings_flat.view(
                 batch_size, num_cells_per_batch, self.config.cell_encoding_dim
             )
+
+            # Token-level memory for decoder
+            token_memory = token_embeddings_flat.view(
+                batch_size, num_cells_per_batch * self.config.cell_size, self.config.hidden_dim
+            )
+            token_memory = token_memory[:, :seq_len, :]
 
             self.context_index.build_index(cell_encodings[0])
 
@@ -284,7 +303,7 @@ class RILA(nn.Module):
 
             generated = self.final_decoder.generate(
                 cognitive_state_final,
-                encoder_memory=cell_encodings,
+                encoder_memory=token_memory,
                 max_length=max_length,
                 **generation_kwargs,
             )

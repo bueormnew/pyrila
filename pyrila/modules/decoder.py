@@ -48,8 +48,9 @@ class FinalDecoder(nn.Module):
         self.bos_token_id = config.bos_token_id
         self.eos_token_id = config.eos_token_id
 
-        # Project cell encodings (4*D) to decoder dim (D)
-        self.memory_projection = nn.Linear(config.cell_encoding_dim, D)
+        # Project encoder memory to decoder dim
+        # Accepts either token-level embeddings (hidden_dim) or cell encodings (4*hidden_dim)
+        self.memory_projection = nn.Linear(config.hidden_dim, D)
         self.memory_norm = nn.LayerNorm(D)
 
         # Project cognitive_state to a context token prepended to memory
@@ -82,17 +83,16 @@ class FinalDecoder(nn.Module):
         cognitive_state: torch.Tensor,
         encoder_memory: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Build decoder memory from cognitive state + optional cell encodings.
+        """Build decoder memory from cognitive state + token-level encoder output.
 
-        Returns (batch, 1+N_cells, hidden_dim) when encoder_memory is provided,
-        or (batch, 1, hidden_dim) as fallback.
+        Returns (batch, 1+seq_len, hidden_dim) when encoder_memory is provided.
+        The cognitive_state is prepended as a global reasoning summary token.
         """
-        # Cognitive state as a global context token
         cog_token = self.cognitive_to_memory(cognitive_state).unsqueeze(1)  # (B, 1, D)
 
         if encoder_memory is not None:
             projected = self.memory_norm(self.memory_projection(encoder_memory))
-            memory = torch.cat([cog_token, projected], dim=1)  # (B, 1+N, D)
+            memory = torch.cat([cog_token, projected], dim=1)  # (B, 1+seq_len, D)
         else:
             memory = cog_token
 

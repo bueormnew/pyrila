@@ -113,3 +113,50 @@ class CellEncoder(nn.Module):
             [c.length for c in cells], dtype=torch.long, device=cell_tokens.device
         )
         return self.forward(cell_tokens, lengths)
+
+    def encode_batch_with_tokens(self, cells: List[ContextCellData]) -> tuple:
+        """Encode cells AND return token-level contextualized embeddings.
+
+        This gives the decoder access to fine-grained token representations
+        while the rest of the RILA pipeline uses the pooled cell encodings.
+
+        Args:
+            cells: List of ContextCellData to encode.
+
+        Returns:
+            Tuple of:
+                cell_encodings: (num_cells, 4 * hidden_dim) pooled CCE vectors
+                token_embeddings: (num_cells, cell_size, hidden_dim) contextualized tokens
+        """
+        if not cells:
+            return (
+                torch.zeros(0, self.config.cell_encoding_dim),
+                torch.zeros(0, self.config.cell_size, self.config.hidden_dim),
+            )
+
+        cell_tokens = torch.stack([c.tokens for c in cells], dim=0)
+        lengths = torch.tensor(
+            [c.length for c in cells], dtype=torch.long, device=cell_tokens.device
+        )
+
+        batch_size, cell_size, D = cell_tokens.shape
+        positions = torch.arange(cell_size, device=cell_tokens.device).unsqueeze(0)
+        padding_mask = positions >= lengths.unsqueeze(1)
+
+        all_padded = lengths == 0
+        if all_padded.any():
+            padding_mask = padding_mask.clone()
+            padding_mask[all_padded] = False
+
+        # Contextualize tokens (this is the key token-level representation)
+        contextualized = self.cell_transformer(cell_tokens, src_key_padding_mask=padding_mask)
+
+        # Pooled cell encodings (for RILA pipeline: index, retrieval, CLP)
+        pooled = self._mean_pool(contextualized, lengths)
+        S = F.normalize(self.semantic_head(pooled), p=2, dim=-1)
+        R = F.normalize(self.relation_head(pooled), p=2, dim=-1)
+        T = F.normalize(self.structural_head(pooled), p=2, dim=-1)
+        I = F.normalize(self.importance_head(pooled), p=2, dim=-1)
+        cell_encodings = torch.cat([S, R, T, I], dim=-1)
+
+        return cell_encodings, contextualized
